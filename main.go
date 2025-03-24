@@ -3,83 +3,75 @@ package main
 import (
 	"fmt"
 	"iter"
-	"net/http"
 	"net/url"
+	"os"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"golang.org/x/net/html"
 )
-
-type ToolbarLayout struct{}
-
-func (toolbar *ToolbarLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
-	w, h := float32(0), float32(0)
-	for _, obj := range objects {
-		objMinSize := obj.MinSize()
-		objSize := obj.Size()
-		if objMinSize.Height > h {
-			h = objMinSize.Height
-		}
-		if objSize.Height == 0 && objSize.Width == 0 {
-			w += objMinSize.Width
-		} else {
-			w += objSize.Width
-		}
-	}
-	return fyne.NewSize(w, h)
-}
-
-func (toolbar *ToolbarLayout) Layout(objects []fyne.CanvasObject, containerSize fyne.Size) {
-	pos := fyne.NewPos(0, 0)
-	for _, obj := range objects {
-		objMinSize := obj.MinSize()
-		objSize := obj.Size()
-		obj.Move(pos)
-		if objSize.Height == 0 && objSize.Width == 0 {
-			obj.Resize(fyne.NewSize(objMinSize.Width, objMinSize.Height))
-			pos.X += objMinSize.Width + 1.0
-		} else {
-			obj.Resize(fyne.NewSize(objSize.Width, objMinSize.Height))
-			pos.X += objSize.Width + 1.0
-		}
-	}
-}
-
-func convSeqToSlice[T any](seq iter.Seq[T]) []T {
-	sliceToRet := []T{}
-	for val := range seq {
-		sliceToRet = append(sliceToRet, val)
-	}
-	return sliceToRet
-}
 
 type Queue[T any] struct {
 	items []T
 }
 
-func (q *Queue[T]) Enqueue(items ...T) {
+func (queue *Queue[T]) Enqueue(items ...T) {
 	for _, item := range items {
-		q.items = append(q.items, item)
+		queue.items = append(queue.items, item)
 	}
 }
 
-func (q *Queue[T]) Dequeue() T {
-	item := q.items[0]
-	if len(q.items) == 1 {
-		q.items = []T{}
+func (queue *Queue[T]) Dequeue() T {
+	item := queue.items[0]
+	if len(queue.items) > 1 {
+		queue.items = queue.items[1:]
 	} else {
-		q.items = q.items[1:]
+		queue.items = []T{}
 	}
 	return item
 }
 
-func (q *Queue[T]) IsEmpty() bool {
-	return len(q.items) == 0
+func (queue *Queue[T]) IsEmpty() bool {
+	return len(queue.items) == 0
+}
+
+type Stack[T any] struct {
+	items []T
+}
+
+func (stack *Stack[T]) Push(items ...T) {
+	for _, item := range items {
+		stack.items = append(stack.items, item)
+	}
+}
+
+func (stack *Stack[T]) Pop() T {
+	item := stack.items[len(stack.items)-1]
+	stack.items = stack.items[:len(stack.items)-1]
+	return item
+}
+
+func (stack *Stack[T]) IsEmpty() bool {
+	return len(stack.items) == 0
+}
+
+func revSlice[T any](slice []T) []T {
+	revedSlice := []T{}
+	for i := len(slice) - 1; i >= 0; i-- {
+		revedSlice = append(revedSlice, slice[i])
+	}
+	return revedSlice
+}
+
+func convSeqToSlice[T any](seq iter.Seq[T]) []T {
+	sliceToRet := []T{}
+	for item := range seq {
+		sliceToRet = append(sliceToRet, item)
+	}
+	return sliceToRet
 }
 
 func main() {
@@ -88,124 +80,97 @@ func main() {
 	w.Resize(fyne.NewSize(800, 600))
 
 	content := container.NewVBox()
-	searchBar := widget.NewEntry()
-	searchBar.PlaceHolder = "Search the web"
-	searchBar.Resize(fyne.NewSize(800, 0))
-	searchBar.OnSubmitted = func(s string) {
-		if s != "" {
-			resp, err := http.Get(fmt.Sprintf("https://%v/", s))
-			if err != nil {
-				fmt.Println(err)
-				panic("todo")
+	file, err := os.Open("test.html")
+	if err != nil {
+		fmt.Println(err)
+		panic("todo")
+	}
+	defer file.Close()
+	doc, err := html.Parse(file)
+	if err != nil {
+		fmt.Println(err)
+		panic("todo")
+	}
+	domStack := Stack[*html.Node]{items: []*html.Node{}}
+	contentStack := Stack[*fyne.Container]{items: []*fyne.Container{}}
+	domStack.Push(doc)
+	contentStack.Push(content)
+	isInline := false
+	for !domStack.IsEmpty() {
+		curDomNode := domStack.Pop()
+		curContent := contentStack.Pop()
+		switch curDomNode.Type {
+		case html.DocumentNode:
+			domStack.Push(revSlice(convSeqToSlice(curDomNode.ChildNodes()))...)
+			contentStack.Push(curContent)
+		case html.ElementNode:
+			if curDomNode.Data == "head" {
+				contentStack.Push(curContent)
+				continue
 			}
-			defer resp.Body.Close()
-			doc, err := html.Parse(resp.Body)
-			if err != nil {
-				fmt.Println(err)
-				panic("todo")
-			}
-			domQueue := Queue[*html.Node]{items: []*html.Node{}}
-			contentQueue := Queue[*fyne.Container]{items: []*fyne.Container{}}
-			domQueue.Enqueue(doc)
-			contentQueue.Enqueue(content)
-			for !domQueue.IsEmpty() {
-				curDomNode := domQueue.Dequeue()
-				curContent := contentQueue.Dequeue()
-				var contentToAdd *fyne.Container
-				switch curDomNode.Type {
-				case html.TextNode:
-					curContent.Add(widget.NewLabel(curDomNode.Data))
-					continue
-				case html.ElementNode:
-					fmt.Println(curDomNode.Data)
-					switch curDomNode.Data {
-					case "head":
-						continue
-					case "script":
-						continue
-					case "link":
-						continue
-					case "input":
-						curContent.Add(widget.NewEntry())
-						continue
-					case "img":
-						imgName := ""
-						for _, attr := range curDomNode.Attr {
-							if attr.Key == "src" {
-								imgName = attr.Val
-							}
-						}
-						if imgName == "" {
-							fmt.Println("no image resource")
-							panic("todo")
-						}
-						imgUrl, err := url.JoinPath(resp.Request.URL.String(), imgName)
-						if err != nil {
-							fmt.Println(err)
-							panic("todo")
-						}
-						imgRes, err := fyne.LoadResourceFromURLString(imgUrl)
-						if err != nil {
-							fmt.Println(err)
-							panic("todo")
-						}
-						curContent.Add(canvas.NewImageFromResource(imgRes))
-						continue
-					case "a":
-						link := ""
-						for _, attr := range curDomNode.Attr {
-							if attr.Key == "href" {
-								link = attr.Val
-							}
-						}
-						if link == "" {
-							fmt.Println("no link in href attribute")
-							panic("todo")
-						}
-						parsedUrl, err := url.Parse(link)
-						if err != nil {
-							fmt.Println(err)
-							panic("todo")
-						}
-						curContent.Add(widget.NewHyperlink(curDomNode.FirstChild.Data, parsedUrl))
-						continue
-					case "form":
-						curContent.Add(container.New(layout.NewFormLayout()))
-						continue
-					case "div":
-						contentToAdd = container.NewVBox()
-					case "span":
-						contentToAdd = container.NewHBox()
-					case "center":
-						contentToAdd = container.NewCenter()
-					default:
-						contentToAdd = container.NewWithoutLayout()
+			if curDomNode.Data == "html" {
+				contentStack.Push(curContent)
+			} else if curDomNode.Data == "input" || curDomNode.Data == "button" || curDomNode.Data == "a" {
+				newContainer := container.NewHBox()
+				var elemToIns fyne.Widget
+				if curDomNode.Data == "input" {
+					elemToIns = widget.NewEntry()
+				} else if curDomNode.Data == "button" {
+					buttonTxt := "Placeholder"
+					if curDomNode.FirstChild != nil {
+						buttonTxt = curDomNode.FirstChild.Data
 					}
-					curContent.Add(contentToAdd)
-				case html.DocumentNode:
-				default:
+					elemToIns = widget.NewButton(buttonTxt, func() {})
+				} else if curDomNode.Data == "a" {
+					linkTxt := curDomNode.FirstChild.Data
+					linkUrl, _ := url.Parse("#")
+					if curDomNode.FirstChild != nil {
+						linkUrlVal := ""
+						for _, linkAttr := range curDomNode.FirstChild.Attr {
+							if linkAttr.Key == "href" {
+								linkUrlVal = linkAttr.Val
+								break
+							}
+						}
+						linkUrl, err = url.Parse(linkUrlVal)
+						if err != nil {
+							fmt.Println(err)
+							panic("todo")
+						}
+					}
+					elemToIns = widget.NewHyperlink(linkTxt, linkUrl)
+				}
+				newContainer.Add(elemToIns)
+				curContent.Add(newContainer)
+				isInline = true
+				contentStack.Push(curContent)
+				contentStack.Push(newContainer)
+				if curDomNode.Data == "button" || curDomNode.Data == "a" {
 					continue
 				}
-				curDomNodeChildren := convSeqToSlice(curDomNode.ChildNodes())
-				if len(curDomNodeChildren) != 0 {
-					domQueue.Enqueue(curDomNodeChildren...)
-					contentQueue.Enqueue(contentToAdd)
+			} else {
+				if isInline {
+					isInline = false
+					curContent = contentStack.Pop()
 				}
+				newContainer := container.NewVBox()
+				curContent.Add(newContainer)
+				contentStack.Push(newContainer)
 			}
+			domStack.Push(revSlice(convSeqToSlice(curDomNode.ChildNodes()))...)
+		case html.TextNode:
+			strText := strings.Trim(curDomNode.Data, "\n ")
+			contentStack.Push(curContent)
+			if strText == "" {
+				continue
+			}
+			curContent.Add(widget.NewLabel(strText))
+		default:
+			contentStack.Push(curContent)
 		}
 	}
-	refreshBtn := widget.NewButtonWithIcon("", resourceRefreshPng, func() {
-		searchEntry := searchBar.Text
-		if !(searchEntry == "") {
-			resp, err := http.Get(fmt.Sprintf("https://%v/", searchEntry))
-			if err != nil {
-				fmt.Println(err)
-				panic("todo")
-			}
-			defer resp.Body.Close()
-		}
-	})
-	toolbar := container.New(&ToolbarLayout{}, refreshBtn, searchBar)
-	w.SetContent(container.NewVBox(toolbar, content))
+	content.Refresh()
+
+	w.SetContent(container.NewVBox(content))
 	w.ShowAndRun()
 }
