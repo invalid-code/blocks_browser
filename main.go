@@ -111,7 +111,6 @@ func main() {
 			if curDomNode.Data == "html" {
 				contentStack.Push(curContent)
 			} else if curDomNode.Data == "input" || curDomNode.Data == "button" || curDomNode.Data == "a" {
-				newContainer := container.NewHBox()
 				var elemToIns fyne.Widget
 				if curDomNode.Data == "input" {
 					elemToIns = widget.NewEntry()
@@ -140,14 +139,47 @@ func main() {
 					}
 					elemToIns = widget.NewHyperlink(linkTxt, linkUrl)
 				}
-				newContainer.Add(elemToIns)
-				curContent.Add(newContainer)
+				if isInline {
+					curContent.Add(elemToIns)
+					contentStack.Push(curContent)
+				} else {
+					newContainer := container.NewHBox()
+					newContainer.Add(elemToIns)
+					curContent.Add(newContainer)
+					contentStack.Push(newContainer)
+					contentStack.Push(curContent)
+				}
 				isInline = true
-				contentStack.Push(curContent)
-				contentStack.Push(newContainer)
 				if curDomNode.Data == "button" || curDomNode.Data == "a" {
 					continue
 				}
+			} else if curDomNode.Data == "ol" || curDomNode.Data == "ul" {
+				if isInline {
+					isInline = false
+					curContent = contentStack.Pop()
+				}
+				curDomNodeChildren := convSeqToSlice(curDomNode.ChildNodes()) // all li elem
+				listItems := []string{}
+				for _, curDomNodeChild := range curDomNodeChildren {
+					if strings.Trim(curDomNodeChild.Data, "\n ") == "" {
+						continue
+					}
+					listItems = append(listItems, curDomNodeChild.FirstChild.Data)
+				}
+				listWidget := widget.NewList(
+					func() int {
+						return len(listItems)
+					},
+					func() fyne.CanvasObject {
+						return widget.NewLabel("template")
+					},
+					func(i widget.ListItemID, o fyne.CanvasObject) {
+						o.(*widget.Label).SetText(listItems[i])
+					},
+				)
+				curContent.Add(listWidget)
+				contentStack.Push(curContent)
+				continue
 			} else {
 				if isInline {
 					isInline = false
