@@ -146,8 +146,8 @@ func main() {
 					newContainer := container.NewHBox()
 					newContainer.Add(elemToIns)
 					curContent.Add(newContainer)
-					contentStack.Push(newContainer)
 					contentStack.Push(curContent)
+					contentStack.Push(newContainer)
 				}
 				isInline = true
 				if curDomNode.Data == "button" || curDomNode.Data == "a" {
@@ -166,18 +166,55 @@ func main() {
 					}
 					listItems = append(listItems, curDomNodeChild.FirstChild.Data)
 				}
-				listWidget := widget.NewList(
-					func() int {
-						return len(listItems)
-					},
-					func() fyne.CanvasObject {
-						return widget.NewLabel("template")
-					},
-					func(i widget.ListItemID, o fyne.CanvasObject) {
-						o.(*widget.Label).SetText(listItems[i])
-					},
-				)
-				curContent.Add(listWidget)
+				newContainer := container.NewVBox()
+				for i, listItem := range listItems {
+					if curDomNode.Data == "ul" {
+						newContainer.Add(widget.NewLabel(fmt.Sprintf("- %v", listItem)))
+					} else {
+						newContainer.Add(widget.NewLabel(fmt.Sprintf("%v. %v", i+1, listItem)))
+					}
+				}
+				curContent.Add(newContainer)
+				contentStack.Push(curContent)
+				continue
+			} else if curDomNode.Data == "table" {
+				if isInline {
+					isInline = false
+					curContent = contentStack.Pop()
+				}
+				tableChildren := convSeqToSlice(curDomNode.ChildNodes())
+				var rowChildren []*html.Node
+				for _, tableChild := range tableChildren {
+					if strings.Trim(tableChild.Data, "\n ") == "" {
+						continue
+					}
+					rowChildren = convSeqToSlice(tableChild.ChildNodes())
+				}
+				tableData := [][]string{}
+				i := 0
+				for _, rowChild := range rowChildren {
+					if strings.Trim(rowChild.Data, "\n ") == "" {
+						continue
+					}
+					tableData = append(tableData, []string{})
+					columnChildren := convSeqToSlice(rowChild.ChildNodes())
+					for _, columnChild := range columnChildren {
+						if strings.Trim(columnChild.Data, "\n ") == "" {
+							continue
+						}
+						tableData[i] = append(tableData[i], columnChild.FirstChild.Data)
+					}
+					i++
+				}
+				tableWidget := container.NewVBox()
+				for _, row := range tableData {
+					rowCollection := container.NewHBox()
+					for _, col := range row {
+						rowCollection.Add(widget.NewLabel(col))
+					}
+					tableWidget.Add(rowCollection)
+				}
+				curContent.Add(tableWidget)
 				contentStack.Push(curContent)
 				continue
 			} else {
@@ -203,6 +240,6 @@ func main() {
 	}
 	content.Refresh()
 
-	w.SetContent(container.NewVBox(content))
+	w.SetContent(content)
 	w.ShowAndRun()
 }
