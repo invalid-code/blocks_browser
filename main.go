@@ -9,10 +9,31 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 	"golang.org/x/net/html"
 )
+
+const (
+	WIDTH, HEIGHT int = 800, 600
+)
+
+type CssOMNode struct {
+	elemType string
+	style    map[string]string
+	parent   *CssOMNode
+}
+
+type CssOM struct {
+	nodes []CssOMNode
+}
+
+type RenderTreeNode struct{}
+
+type RenderTree struct {
+	nodes []RenderTreeNode
+}
 
 type Queue[T any] struct {
 	items []T
@@ -38,34 +59,6 @@ func (queue *Queue[T]) IsEmpty() bool {
 	return len(queue.items) == 0
 }
 
-type Stack[T any] struct {
-	items []T
-}
-
-func (stack *Stack[T]) Push(items ...T) {
-	for _, item := range items {
-		stack.items = append(stack.items, item)
-	}
-}
-
-func (stack *Stack[T]) Pop() T {
-	item := stack.items[len(stack.items)-1]
-	stack.items = stack.items[:len(stack.items)-1]
-	return item
-}
-
-func (stack *Stack[T]) IsEmpty() bool {
-	return len(stack.items) == 0
-}
-
-func revSlice[T any](slice []T) []T {
-	revedSlice := []T{}
-	for i := len(slice) - 1; i >= 0; i-- {
-		revedSlice = append(revedSlice, slice[i])
-	}
-	return revedSlice
-}
-
 func convSeqToSlice[T any](seq iter.Seq[T]) []T {
 	sliceToRet := []T{}
 	for item := range seq {
@@ -77,7 +70,7 @@ func convSeqToSlice[T any](seq iter.Seq[T]) []T {
 func main() {
 	a := app.New()
 	w := a.NewWindow("Blocks Browser")
-	w.Resize(fyne.NewSize(800, 600))
+	w.Resize(fyne.NewSize(float32(WIDTH), float32(HEIGHT)))
 
 	content := container.NewVBox()
 	file, err := os.Open("test.html")
@@ -91,155 +84,194 @@ func main() {
 		fmt.Println(err)
 		panic("todo")
 	}
-	domStack := Stack[*html.Node]{items: []*html.Node{}}
-	contentStack := Stack[*fyne.Container]{items: []*fyne.Container{}}
-	domStack.Push(doc)
-	contentStack.Push(content)
+	domQueue := Queue[*html.Node]{items: []*html.Node{}}
+	contentQueue := Queue[*fyne.Container]{items: []*fyne.Container{}}
+	domQueue.Enqueue(doc)
+	contentQueue.Enqueue(content)
 	isInline := false
-	for !domStack.IsEmpty() {
-		curDomNode := domStack.Pop()
-		curContent := contentStack.Pop()
+	inlineContainer := container.NewHBox()
+	olIndex := 1
+	for !domQueue.IsEmpty() {
+		curDomNode := domQueue.Dequeue()
+		curContent := contentQueue.Dequeue()
+		curDomNodeChildren := convSeqToSlice(curDomNode.ChildNodes())
 		switch curDomNode.Type {
-		case html.DocumentNode:
-			domStack.Push(revSlice(convSeqToSlice(curDomNode.ChildNodes()))...)
-			contentStack.Push(curContent)
 		case html.ElementNode:
-			if curDomNode.Data == "head" {
-				contentStack.Push(curContent)
+			switch curDomNode.Data {
+			case "head":
 				continue
-			}
-			if curDomNode.Data == "html" {
-				contentStack.Push(curContent)
-			} else if curDomNode.Data == "input" || curDomNode.Data == "button" || curDomNode.Data == "a" {
-				var elemToIns fyne.Widget
-				if curDomNode.Data == "input" {
-					elemToIns = widget.NewEntry()
-				} else if curDomNode.Data == "button" {
-					buttonTxt := "Placeholder"
-					if curDomNode.FirstChild != nil {
-						buttonTxt = curDomNode.FirstChild.Data
-					}
-					elemToIns = widget.NewButton(buttonTxt, func() {})
-				} else if curDomNode.Data == "a" {
-					linkTxt := curDomNode.FirstChild.Data
-					linkUrl, _ := url.Parse("#")
-					if curDomNode.FirstChild != nil {
-						linkUrlVal := ""
-						for _, linkAttr := range curDomNode.FirstChild.Attr {
-							if linkAttr.Key == "href" {
-								linkUrlVal = linkAttr.Val
-								break
-							}
-						}
-						linkUrl, err = url.Parse(linkUrlVal)
-						if err != nil {
-							fmt.Println(err)
-							panic("todo")
-						}
-					}
-					elemToIns = widget.NewHyperlink(linkTxt, linkUrl)
+			case "html":
+				for i := 0; i < len(curDomNodeChildren); i++ {
+					contentQueue.Enqueue(curContent)
 				}
-				if isInline {
-					curContent.Add(elemToIns)
-					contentStack.Push(curContent)
-				} else {
-					newContainer := container.NewHBox()
-					newContainer.Add(elemToIns)
-					curContent.Add(newContainer)
-					contentStack.Push(curContent)
-					contentStack.Push(newContainer)
-				}
-				isInline = true
-				if curDomNode.Data == "button" || curDomNode.Data == "a" {
-					continue
-				}
-			} else if curDomNode.Data == "ol" || curDomNode.Data == "ul" {
-				if isInline {
-					isInline = false
-					curContent = contentStack.Pop()
-				}
-				curDomNodeChildren := convSeqToSlice(curDomNode.ChildNodes()) // all li elem
-				listItems := []string{}
-				for _, curDomNodeChild := range curDomNodeChildren {
-					if strings.Trim(curDomNodeChild.Data, "\n ") == "" {
-						continue
-					}
-					listItems = append(listItems, curDomNodeChild.FirstChild.Data)
-				}
+			case "body":
 				newContainer := container.NewVBox()
-				for i, listItem := range listItems {
-					if curDomNode.Data == "ul" {
-						newContainer.Add(widget.NewLabel(fmt.Sprintf("- %v", listItem)))
-					} else {
-						newContainer.Add(widget.NewLabel(fmt.Sprintf("%v. %v", i+1, listItem)))
-					}
+				for i := 0; i < len(curDomNodeChildren); i++ {
+					contentQueue.Enqueue(newContainer)
 				}
 				curContent.Add(newContainer)
-				contentStack.Push(curContent)
-				continue
-			} else if curDomNode.Data == "table" {
+			case "div":
 				if isInline {
 					isInline = false
-					curContent = contentStack.Pop()
-				}
-				tableChildren := convSeqToSlice(curDomNode.ChildNodes())
-				var rowChildren []*html.Node
-				for _, tableChild := range tableChildren {
-					if strings.Trim(tableChild.Data, "\n ") == "" {
-						continue
-					}
-					rowChildren = convSeqToSlice(tableChild.ChildNodes())
-				}
-				tableData := [][]string{}
-				i := 0
-				for _, rowChild := range rowChildren {
-					if strings.Trim(rowChild.Data, "\n ") == "" {
-						continue
-					}
-					tableData = append(tableData, []string{})
-					columnChildren := convSeqToSlice(rowChild.ChildNodes())
-					for _, columnChild := range columnChildren {
-						if strings.Trim(columnChild.Data, "\n ") == "" {
-							continue
-						}
-						tableData[i] = append(tableData[i], columnChild.FirstChild.Data)
-					}
-					i++
-				}
-				tableWidget := container.NewVBox()
-				for _, row := range tableData {
-					rowCollection := container.NewHBox()
-					for _, col := range row {
-						rowCollection.Add(widget.NewLabel(col))
-					}
-					tableWidget.Add(rowCollection)
-				}
-				curContent.Add(tableWidget)
-				contentStack.Push(curContent)
-				continue
-			} else {
-				if isInline {
-					isInline = false
-					curContent = contentStack.Pop()
+					inlineContainer = container.NewHBox()
 				}
 				newContainer := container.NewVBox()
+				for i := 0; i < len(curDomNodeChildren); i++ {
+					contentQueue.Enqueue(newContainer)
+				}
 				curContent.Add(newContainer)
-				contentStack.Push(newContainer)
+			case "input":
+				inlineContainer.Add(widget.NewEntry())
+				if !isInline {
+					isInline = true
+					curContent.Add(inlineContainer)
+				}
+			case "button":
+				newContainer := container.NewVBox()
+				inlineContainer.Add(newContainer)
+				contentQueue.Enqueue(newContainer)
+				if !isInline {
+					isInline = true
+					curContent.Add(inlineContainer)
+				}
+			case "a":
+				newContainer := container.NewVBox()
+				inlineContainer.Add(newContainer)
+				contentQueue.Enqueue(newContainer)
+				if !isInline {
+					isInline = true
+					curContent.Add(inlineContainer)
+				}
+			case "ul":
+				if isInline {
+					isInline = false
+					inlineContainer = container.NewHBox()
+				}
+				newContainer := container.NewVBox()
+				for i := 0; i < len(curDomNodeChildren); i++ {
+					contentQueue.Enqueue(newContainer)
+				}
+				curContent.Add(newContainer)
+			case "ol":
+				if isInline {
+					isInline = false
+					inlineContainer = container.NewHBox()
+				}
+				newContainer := container.NewVBox()
+				for i := 0; i < len(curDomNodeChildren); i++ {
+					contentQueue.Enqueue(newContainer)
+				}
+				curContent.Add(newContainer)
+			case "li":
+				newContainer := container.NewVBox()
+				curContent.Add(newContainer)
+				contentQueue.Enqueue(newContainer)
+			case "table":
+				if isInline {
+					isInline = false
+					inlineContainer = container.NewHBox()
+				}
+				newContainer := container.NewVBox()
+				for i := 0; i < len(curDomNodeChildren); i++ {
+					contentQueue.Enqueue(newContainer)
+				}
+				curContent.Add(newContainer)
+			case "tr":
+				newContainer := container.NewHBox()
+				for i := 0; i < len(curDomNodeChildren); i++ {
+					contentQueue.Enqueue(newContainer)
+				}
+				curContent.Add(newContainer)
+			case "td":
+				newContainer := container.NewVBox()
+				curContent.Add(newContainer)
+				contentQueue.Enqueue(newContainer)
+			case "img":
+				imgSrc := ""
+				for _, attr := range curDomNode.Attr {
+					if attr.Key == "src" {
+						imgSrc = attr.Val
+					}
+				}
+				inlineContainer.Add(canvas.NewImageFromFile(imgSrc))
+				if !isInline {
+					isInline = true
+					curContent.Add(inlineContainer)
+				}
+			case "span":
+				newContainer := container.NewVBox()
+				inlineContainer.Add(newContainer)
+				contentQueue.Enqueue(newContainer)
+				if !isInline {
+					isInline = true
+					curContent.Add(inlineContainer)
+				}
+			case "tbody":
+				newContainer := container.NewVBox()
+				for i := 0; i < len(curDomNodeChildren); i++ {
+					contentQueue.Enqueue(newContainer)
+				}
+				curContent.Add(newContainer)
 			}
-			domStack.Push(revSlice(convSeqToSlice(curDomNode.ChildNodes()))...)
+			domQueue.Enqueue(curDomNodeChildren...)
 		case html.TextNode:
-			strText := strings.Trim(curDomNode.Data, "\n ")
-			contentStack.Push(curContent)
-			if strText == "" {
+			text := strings.Trim(curDomNode.Data, "\n ")
+			if text == "" {
 				continue
 			}
-			curContent.Add(widget.NewLabel(strText))
+			textWidget := widget.NewLabel(text)
+			switch curDomNode.Parent.Data {
+			case "a":
+				linkAttr := ""
+				for _, attr := range curDomNode.Parent.Attr {
+					if attr.Key == "href" {
+						linkAttr = attr.Val
+					}
+				}
+				link, err := url.Parse(linkAttr)
+				if err != nil {
+					panic(err)
+				}
+				curContent.Add(widget.NewHyperlink(text, link))
+			case "button":
+				curContent.Add(widget.NewButton(text, func() {}))
+			case "li":
+				switch curDomNode.Parent.Parent.Data {
+				case "ul":
+					curContent.Add(widget.NewLabel(fmt.Sprintf("- %v", text)))
+				case "ol":
+					curContent.Add(widget.NewLabel(fmt.Sprintf("%v. %v", olIndex, text)))
+					olIndex += 1
+				}
+			case "div":
+				curContent.Add(textWidget)
+			case "span":
+				curContent.Add(textWidget)
+			case "td":
+				curContent.Add(textWidget)
+			case "body":
+				if isInline {
+					inlineContainer.Add(textWidget)
+				} else {
+					curContent.Add(textWidget)
+				}
+			}
 		default:
-			contentStack.Push(curContent)
+			for i := 0; i < len(curDomNodeChildren); i++ {
+				contentQueue.Enqueue(curContent)
+			}
+			domQueue.Enqueue(curDomNodeChildren...)
 		}
 	}
-	content.Refresh()
-
-	w.SetContent(content)
+	height := 0
+	for _, child := range content.Objects {
+		height += int(child.MinSize().Height)
+	}
+	if height > HEIGHT {
+		scrollableContent := container.NewVScroll(content)
+		w.SetContent(scrollableContent)
+	} else {
+		w.SetContent(content)
+	}
 	w.ShowAndRun()
 }
