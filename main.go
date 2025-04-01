@@ -233,9 +233,14 @@ func main() {
 			switch curDomNode.Parent.DataAtom {
 			case atom.Script:
 				scripts += curDomNode.Data
+				continue
 			case atom.Style:
 				styles += curDomNode.Data
+				continue
+			case atom.Title:
+				continue
 			}
+			cssOMNodeQueue.Dequeue()
 		}
 		domQueue.Enqueue(curDomNodeChildren...)
 	}
