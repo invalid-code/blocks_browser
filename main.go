@@ -24,23 +24,18 @@ const (
 	WIDTH, HEIGHT int = 800, 600
 )
 
-var DEGREE int = 0
-
-type CssOMNode struct {
-	children []*CssOMNode
-	isRoot   bool
-	elemType string
-	style    map[string]string
-	parent   *CssOMNode
+type CssOM struct {
+	rootNode CssOMNode
+	degree   int
 }
 
-func (node *CssOMNode) printTree(degree uint) {
+func (cssOM *CssOM) printTree(degree int) {
 	treeNodeStack := Stack[*CssOMNode]{items: []*CssOMNode{}}
 	levelStack := Stack[int]{items: []int{}}
-	treeNodeStack.Push(node)
+	treeNodeStack.Push(&cssOM.rootNode)
 	levelStack.Push(0)
 	if degree < 0 {
-		degree = uint(DEGREE)
+		degree = cssOM.degree
 	}
 	for !treeNodeStack.IsEmpty() {
 		curTreeNode := treeNodeStack.Pop()
@@ -50,13 +45,21 @@ func (node *CssOMNode) printTree(degree uint) {
 			levelStack.Push(curLevel + 1)
 		}
 		treeNodeStack.Push(revSlice(curTreeNodeChildren)...)
-		if uint(curLevel) <= degree {
+		if curLevel <= degree {
 			for i := 0; i < curLevel; i++ {
 				fmt.Printf("-")
 			}
-			fmt.Println(curTreeNode)
+			fmt.Println(curTreeNode.elemType)
 		}
 	}
+}
+
+type CssOMNode struct {
+	children []*CssOMNode
+	isRoot   bool
+	elemType string
+	style    map[string]string
+	parent   *CssOMNode
 }
 
 type Stack[T any] struct {
@@ -136,7 +139,7 @@ func main() {
 		fmt.Println(err)
 		panic("todo")
 	}
-	var cssOM CssOMNode
+	var cssOM CssOM
 	cssOMNodeQueue := Queue[*CssOMNode]{items: []*CssOMNode{}}
 	domQueue := Queue[*html.Node]{items: []*html.Node{}}
 	domQueue.Enqueue(doc)
@@ -197,13 +200,13 @@ func main() {
 					scripts += string(fileContents)
 					continue
 				}
-			case atom.Meta | atom.Title | atom.Style:
+			case atom.Meta, atom.Style, atom.Title:
 			case atom.Head:
 				cssOMNodeQueue.Dequeue()
 			case atom.Html:
-				cssOM = CssOMNode{children: []*CssOMNode{}, isRoot: true, elemType: curDomNode.Data, style: map[string]string{}, parent: nil}
+				cssOM.rootNode = CssOMNode{children: []*CssOMNode{}, isRoot: true, elemType: curDomNode.Data, style: map[string]string{}, parent: nil}
 				for i := 0; i < len(curDomNodeChildren); i++ {
-					cssOMNodeQueue.Enqueue(&cssOM)
+					cssOMNodeQueue.Enqueue(&cssOM.rootNode)
 				}
 			default:
 				for _, attr := range curDomNode.Attr {
@@ -215,7 +218,7 @@ func main() {
 				cssOMNode := CssOMNode{children: []*CssOMNode{}, isRoot: false, elemType: curDomNode.Data, style: map[string]string{}, parent: parentCssOMNode}
 				parentCssOMNode.children = append(parentCssOMNode.children, &cssOMNode)
 				for i := 0; i < len(curDomNodeChildren); i++ {
-					DEGREE += 1
+					cssOM.degree += 1
 					cssOMNodeQueue.Enqueue(&cssOMNode)
 				}
 			}
@@ -258,7 +261,7 @@ func main() {
 			rules[curRule][string(data)] = ruleVal
 		}
 	}
-	cssOM.printTree()
+	cssOM.printTree(-1)
 
 	// rendering
 	// isInline := false
