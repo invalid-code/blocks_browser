@@ -24,18 +24,18 @@ const (
 	WIDTH, HEIGHT int = 800, 600
 )
 
-type CssOM struct {
-	rootNode CssOMNode
+type RenderTree struct {
+	rootNode renderTreeNode
 	degree   int
 }
 
-func (cssOM *CssOM) printTree(degree int) {
-	treeNodeStack := Stack[*CssOMNode]{items: []*CssOMNode{}}
+func (renderTree *RenderTree) printTree(degree int) {
+	treeNodeStack := Stack[*renderTreeNode]{items: []*renderTreeNode{}}
 	levelStack := Stack[int]{items: []int{}}
-	treeNodeStack.Push(&cssOM.rootNode)
+	treeNodeStack.Push(&renderTree.rootNode)
 	levelStack.Push(0)
 	if degree < 0 {
-		degree = cssOM.degree
+		degree = renderTree.degree
 	}
 	for !treeNodeStack.IsEmpty() {
 		curTreeNode := treeNodeStack.Pop()
@@ -54,12 +54,12 @@ func (cssOM *CssOM) printTree(degree int) {
 	}
 }
 
-type CssOMNode struct {
-	children []*CssOMNode
+type renderTreeNode struct {
+	children []*renderTreeNode
 	isRoot   bool
 	elemType string
 	style    map[string]string
-	parent   *CssOMNode
+	parent   *renderTreeNode
 }
 
 type Stack[T any] struct {
@@ -139,8 +139,8 @@ func main() {
 		fmt.Println(err)
 		panic("todo")
 	}
-	var cssOM CssOM
-	cssOMNodeQueue := Queue[*CssOMNode]{items: []*CssOMNode{}}
+	var cssOM RenderTree
+	renderTreeNodeQueue := Queue[*renderTreeNode]{items: []*renderTreeNode{}}
 	domQueue := Queue[*html.Node]{items: []*html.Node{}}
 	domQueue.Enqueue(doc)
 	// cssom creation
@@ -148,26 +148,6 @@ func main() {
 	scripts := ""
 	for !domQueue.IsEmpty() {
 		curDomNode := domQueue.Dequeue()
-		// fmt.Println(cssOMNodeQueue)
-		// switch curDomNode.Type {
-		// case html.ErrorNode:
-		// 	fmt.Println("Error Node")
-		// case html.TextNode:
-		// 	fmt.Println("Text Node")
-		// 	fmt.Printf("'%v'\n", curDomNode.Data)
-		// case html.DocumentNode:
-		// 	fmt.Println("Document Node")
-		// case html.ElementNode:
-		// 	fmt.Println("Element Node")
-		// 	fmt.Println(curDomNode.Data)
-		// case html.CommentNode:
-		// 	fmt.Println("Comment Node")
-		// case html.DoctypeNode:
-		// 	fmt.Println("Doctype Node")
-		// case html.RawNode:
-		// 	fmt.Println("Raw Node")
-		// }
-		// fmt.Println()
 		curDomNodeChildren := convSeqToSlice(curDomNode.ChildNodes())
 		switch curDomNode.Type {
 		case html.ElementNode:
@@ -202,11 +182,11 @@ func main() {
 				}
 			case atom.Meta, atom.Style, atom.Title:
 			case atom.Head:
-				cssOMNodeQueue.Dequeue()
+				renderTreeNodeQueue.Dequeue()
 			case atom.Html:
-				cssOM.rootNode = CssOMNode{children: []*CssOMNode{}, isRoot: true, elemType: curDomNode.Data, style: map[string]string{}, parent: nil}
+				cssOM.rootNode = renderTreeNode{children: []*renderTreeNode{}, isRoot: true, elemType: curDomNode.Data, style: map[string]string{}, parent: nil}
 				for i := 0; i < len(curDomNodeChildren); i++ {
-					cssOMNodeQueue.Enqueue(&cssOM.rootNode)
+					renderTreeNodeQueue.Enqueue(&cssOM.rootNode)
 				}
 			default:
 				for _, attr := range curDomNode.Attr {
@@ -214,19 +194,19 @@ func main() {
 						styles += fmt.Sprintf("\n%v {\n%v\n}", curDomNode.Data, attr.Val)
 					}
 				}
-				parentCssOMNode := cssOMNodeQueue.Dequeue()
-				cssOMNode := CssOMNode{children: []*CssOMNode{}, isRoot: false, elemType: curDomNode.Data, style: map[string]string{}, parent: parentCssOMNode}
+				parentCssOMNode := renderTreeNodeQueue.Dequeue()
+				cssOMNode := renderTreeNode{children: []*renderTreeNode{}, isRoot: false, elemType: curDomNode.Data, style: map[string]string{}, parent: parentCssOMNode}
 				parentCssOMNode.children = append(parentCssOMNode.children, &cssOMNode)
 				for i := 0; i < len(curDomNodeChildren); i++ {
 					cssOM.degree += 1
-					cssOMNodeQueue.Enqueue(&cssOMNode)
+					renderTreeNodeQueue.Enqueue(&cssOMNode)
 				}
 			}
 		case html.TextNode:
 			text := strings.Trim(curDomNode.Data, "\n ")
 			if text == "" {
 				if curDomNode.Parent.DataAtom != atom.Head {
-					cssOMNodeQueue.Dequeue()
+					renderTreeNodeQueue.Dequeue()
 				}
 				continue
 			}
@@ -240,7 +220,7 @@ func main() {
 			case atom.Title:
 				continue
 			}
-			cssOMNodeQueue.Dequeue()
+			renderTreeNodeQueue.Dequeue()
 		}
 		domQueue.Enqueue(curDomNodeChildren...)
 	}
@@ -266,7 +246,6 @@ func main() {
 			rules[curRule][string(data)] = ruleVal
 		}
 	}
-	cssOM.printTree(-1)
 
 	// rendering
 	// isInline := false
