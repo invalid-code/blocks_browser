@@ -3,36 +3,80 @@ package main
 import (
 	"fmt"
 	"iter"
-	"net/url"
+
+	// "net/url"
 	"os"
 	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/canvas"
+
+	// "fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/widget"
+	// "fyne.io/fyne/v2/widget"
+	"github.com/tdewolff/parse/v2"
+	"github.com/tdewolff/parse/v2/css"
 	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 const (
 	WIDTH, HEIGHT int = 800, 600
 )
 
+var DEGREE int = 0
+
 type CssOMNode struct {
+	children []*CssOMNode
+	isRoot   bool
 	elemType string
 	style    map[string]string
 	parent   *CssOMNode
 }
 
-type CssOM struct {
-	nodes []CssOMNode
+func (node *CssOMNode) printTree(degree uint) {
+	treeNodeStack := Stack[*CssOMNode]{items: []*CssOMNode{}}
+	levelStack := Stack[int]{items: []int{}}
+	treeNodeStack.Push(node)
+	levelStack.Push(0)
+	if degree < 0 {
+		degree = uint(DEGREE)
+	}
+	for !treeNodeStack.IsEmpty() {
+		curTreeNode := treeNodeStack.Pop()
+		curLevel := levelStack.Pop()
+		curTreeNodeChildren := curTreeNode.children
+		for i := 0; i < len(curTreeNodeChildren); i++ {
+			levelStack.Push(curLevel + 1)
+		}
+		treeNodeStack.Push(revSlice(curTreeNodeChildren)...)
+		if uint(curLevel) <= degree {
+			for i := 0; i < curLevel; i++ {
+				fmt.Printf("-")
+			}
+			fmt.Println(curTreeNode)
+		}
+	}
 }
 
-type RenderTreeNode struct{}
+type Stack[T any] struct {
+	items []T
+}
 
-type RenderTree struct {
-	nodes []RenderTreeNode
+func (stack *Stack[T]) Push(items ...T) {
+	for _, item := range items {
+		stack.items = append(stack.items, item)
+	}
+}
+
+func (stack *Stack[T]) Pop() T {
+	item := stack.items[len(stack.items)-1]
+	stack.items = stack.items[:len(stack.items)-1]
+	return item
+}
+
+func (stack *Stack[T]) IsEmpty() bool {
+	return len(stack.items) == 0
 }
 
 type Queue[T any] struct {
@@ -67,6 +111,14 @@ func convSeqToSlice[T any](seq iter.Seq[T]) []T {
 	return sliceToRet
 }
 
+func revSlice[T any](sliceToRev []T) []T {
+	revedSlice := []T{}
+	for i := len(sliceToRev) - 1; i > -1; i-- {
+		revedSlice = append(revedSlice, sliceToRev[i])
+	}
+	return revedSlice
+}
+
 func main() {
 	a := app.New()
 	w := a.NewWindow("Blocks Browser")
@@ -84,185 +136,306 @@ func main() {
 		fmt.Println(err)
 		panic("todo")
 	}
+	var cssOM CssOMNode
+	cssOMNodeQueue := Queue[*CssOMNode]{items: []*CssOMNode{}}
 	domQueue := Queue[*html.Node]{items: []*html.Node{}}
-	contentQueue := Queue[*fyne.Container]{items: []*fyne.Container{}}
 	domQueue.Enqueue(doc)
-	contentQueue.Enqueue(content)
-	isInline := false
-	inlineContainer := container.NewHBox()
-	olIndex := 1
+	// cssom creation
+	styles := ""
+	scripts := ""
 	for !domQueue.IsEmpty() {
 		curDomNode := domQueue.Dequeue()
-		curContent := contentQueue.Dequeue()
+		// fmt.Println(cssOMNodeQueue)
+		// switch curDomNode.Type {
+		// case html.ErrorNode:
+		// 	fmt.Println("Error Node")
+		// case html.TextNode:
+		// 	fmt.Println("Text Node")
+		// 	fmt.Printf("'%v'\n", curDomNode.Data)
+		// case html.DocumentNode:
+		// 	fmt.Println("Document Node")
+		// case html.ElementNode:
+		// 	fmt.Println("Element Node")
+		// 	fmt.Println(curDomNode.Data)
+		// case html.CommentNode:
+		// 	fmt.Println("Comment Node")
+		// case html.DoctypeNode:
+		// 	fmt.Println("Doctype Node")
+		// case html.RawNode:
+		// 	fmt.Println("Raw Node")
+		// }
+		// fmt.Println()
 		curDomNodeChildren := convSeqToSlice(curDomNode.ChildNodes())
 		switch curDomNode.Type {
 		case html.ElementNode:
-			switch curDomNode.Data {
-			case "head":
-				continue
-			case "html":
-				for i := 0; i < len(curDomNodeChildren); i++ {
-					contentQueue.Enqueue(curContent)
-				}
-			case "body":
-				newContainer := container.NewVBox()
-				for i := 0; i < len(curDomNodeChildren); i++ {
-					contentQueue.Enqueue(newContainer)
-				}
-				curContent.Add(newContainer)
-			case "div":
-				if isInline {
-					isInline = false
-					inlineContainer = container.NewHBox()
-				}
-				newContainer := container.NewVBox()
-				for i := 0; i < len(curDomNodeChildren); i++ {
-					contentQueue.Enqueue(newContainer)
-				}
-				curContent.Add(newContainer)
-			case "input":
-				inlineContainer.Add(widget.NewEntry())
-				if !isInline {
-					isInline = true
-					curContent.Add(inlineContainer)
-				}
-			case "button":
-				newContainer := container.NewVBox()
-				inlineContainer.Add(newContainer)
-				contentQueue.Enqueue(newContainer)
-				if !isInline {
-					isInline = true
-					curContent.Add(inlineContainer)
-				}
-			case "a":
-				newContainer := container.NewVBox()
-				inlineContainer.Add(newContainer)
-				contentQueue.Enqueue(newContainer)
-				if !isInline {
-					isInline = true
-					curContent.Add(inlineContainer)
-				}
-			case "ul":
-				if isInline {
-					isInline = false
-					inlineContainer = container.NewHBox()
-				}
-				newContainer := container.NewVBox()
-				for i := 0; i < len(curDomNodeChildren); i++ {
-					contentQueue.Enqueue(newContainer)
-				}
-				curContent.Add(newContainer)
-			case "ol":
-				if isInline {
-					isInline = false
-					inlineContainer = container.NewHBox()
-				}
-				newContainer := container.NewVBox()
-				for i := 0; i < len(curDomNodeChildren); i++ {
-					contentQueue.Enqueue(newContainer)
-				}
-				curContent.Add(newContainer)
-			case "li":
-				newContainer := container.NewVBox()
-				curContent.Add(newContainer)
-				contentQueue.Enqueue(newContainer)
-			case "table":
-				if isInline {
-					isInline = false
-					inlineContainer = container.NewHBox()
-				}
-				newContainer := container.NewVBox()
-				for i := 0; i < len(curDomNodeChildren); i++ {
-					contentQueue.Enqueue(newContainer)
-				}
-				curContent.Add(newContainer)
-			case "tr":
-				newContainer := container.NewHBox()
-				for i := 0; i < len(curDomNodeChildren); i++ {
-					contentQueue.Enqueue(newContainer)
-				}
-				curContent.Add(newContainer)
-			case "td":
-				newContainer := container.NewVBox()
-				curContent.Add(newContainer)
-				contentQueue.Enqueue(newContainer)
-			case "img":
-				imgSrc := ""
+			switch curDomNode.DataAtom {
+			case atom.Link:
+				href := ""
 				for _, attr := range curDomNode.Attr {
-					if attr.Key == "src" {
-						imgSrc = attr.Val
-					}
-				}
-				inlineContainer.Add(canvas.NewImageFromFile(imgSrc))
-				if !isInline {
-					isInline = true
-					curContent.Add(inlineContainer)
-				}
-			case "span":
-				newContainer := container.NewVBox()
-				inlineContainer.Add(newContainer)
-				contentQueue.Enqueue(newContainer)
-				if !isInline {
-					isInline = true
-					curContent.Add(inlineContainer)
-				}
-			case "tbody":
-				newContainer := container.NewVBox()
-				for i := 0; i < len(curDomNodeChildren); i++ {
-					contentQueue.Enqueue(newContainer)
-				}
-				curContent.Add(newContainer)
-			}
-			domQueue.Enqueue(curDomNodeChildren...)
-		case html.TextNode:
-			text := strings.Trim(curDomNode.Data, "\n ")
-			if text == "" {
-				continue
-			}
-			textWidget := widget.NewLabel(text)
-			switch curDomNode.Parent.Data {
-			case "a":
-				linkAttr := ""
-				for _, attr := range curDomNode.Parent.Attr {
 					if attr.Key == "href" {
-						linkAttr = attr.Val
+						href = attr.Val
 					}
 				}
-				link, err := url.Parse(linkAttr)
+				fileContents, err := os.ReadFile(href)
 				if err != nil {
 					panic(err)
 				}
-				curContent.Add(widget.NewHyperlink(text, link))
-			case "button":
-				curContent.Add(widget.NewButton(text, func() {}))
-			case "li":
-				switch curDomNode.Parent.Parent.Data {
-				case "ul":
-					curContent.Add(widget.NewLabel(fmt.Sprintf("- %v", text)))
-				case "ol":
-					curContent.Add(widget.NewLabel(fmt.Sprintf("%v. %v", olIndex, text)))
-					olIndex += 1
+				styles += string(fileContents)
+				continue
+			case atom.Script:
+				src := ""
+				for _, attr := range curDomNode.Attr {
+					if attr.Key == "src" {
+						src = attr.Val
+					}
 				}
-			case "div":
-				curContent.Add(textWidget)
-			case "span":
-				curContent.Add(textWidget)
-			case "td":
-				curContent.Add(textWidget)
-			case "body":
-				if isInline {
-					inlineContainer.Add(textWidget)
-				} else {
-					curContent.Add(textWidget)
+				if src != "" {
+					fileContents, err := os.ReadFile(src)
+					if err != nil {
+						panic(err)
+					}
+					scripts += string(fileContents)
+					continue
+				}
+			case atom.Meta | atom.Title | atom.Style:
+			case atom.Head:
+				cssOMNodeQueue.Dequeue()
+			case atom.Html:
+				cssOM = CssOMNode{children: []*CssOMNode{}, isRoot: true, elemType: curDomNode.Data, style: map[string]string{}, parent: nil}
+				for i := 0; i < len(curDomNodeChildren); i++ {
+					cssOMNodeQueue.Enqueue(&cssOM)
+				}
+			default:
+				for _, attr := range curDomNode.Attr {
+					if attr.Key == "style" {
+						styles += fmt.Sprintf("\n%v {\n%v\n}", curDomNode.Data, attr.Val)
+					}
+				}
+				parentCssOMNode := cssOMNodeQueue.Dequeue()
+				cssOMNode := CssOMNode{children: []*CssOMNode{}, isRoot: false, elemType: curDomNode.Data, style: map[string]string{}, parent: parentCssOMNode}
+				parentCssOMNode.children = append(parentCssOMNode.children, &cssOMNode)
+				for i := 0; i < len(curDomNodeChildren); i++ {
+					DEGREE += 1
+					cssOMNodeQueue.Enqueue(&cssOMNode)
 				}
 			}
-		default:
-			for i := 0; i < len(curDomNodeChildren); i++ {
-				contentQueue.Enqueue(curContent)
+		case html.TextNode:
+			text := strings.Trim(curDomNode.Data, "\n ")
+			if text == "" {
+				if curDomNode.Parent.DataAtom != atom.Head {
+					cssOMNodeQueue.Dequeue()
+				}
+				continue
 			}
-			domQueue.Enqueue(curDomNodeChildren...)
+			switch curDomNode.Parent.DataAtom {
+			case atom.Script:
+				scripts += curDomNode.Data
+			case atom.Style:
+				styles += curDomNode.Data
+			}
+		}
+		domQueue.Enqueue(curDomNodeChildren...)
+	}
+	parser := css.NewParser(parse.NewInput(strings.NewReader(styles)), false)
+	finished := false
+	curRule := ""
+	rules := map[string]map[string]string{}
+	for !finished {
+		ruleSet, _, data := parser.Next()
+		switch ruleSet {
+		case css.ErrorGrammar:
+			if parser.Err().Error() == "EOF" {
+				finished = true
+			}
+		case css.BeginRulesetGrammar:
+			curRule = string(parser.Values()[0].Data)
+			rules[curRule] = map[string]string{}
+		case css.DeclarationGrammar:
+			ruleVal := ""
+			for _, ruleValPart := range parser.Values() {
+				ruleVal += string(ruleValPart.Data)
+			}
+			rules[curRule][string(data)] = ruleVal
 		}
 	}
+	cssOM.printTree()
+
+	// rendering
+	// isInline := false
+	// inlineContainer := container.NewHBox()
+	// olIndex := 1
+	// for !domQueue.IsEmpty() {
+	// 	curDomNode := domQueue.Dequeue()
+	// curContent := contentQueue.Dequeue()
+	// curDomNodeChildren := convSeqToSlice(curDomNode.ChildNodes())
+	// switch curDomNode.Type {
+	// case html.ElementNode:
+	// 	switch curDomNode.Data {
+	// 	case "head":
+	// 		continue
+	// 	case "html":
+	// 		for i := 0; i < len(curDomNodeChildren); i++ {
+	// 			contentQueue.Enqueue(curContent)
+	// 		}
+	// 	case "body":
+	// 		newContainer := container.NewVBox()
+	// 		for i := 0; i < len(curDomNodeChildren); i++ {
+	// 			contentQueue.Enqueue(newContainer)
+	// 		}
+	// 		curContent.Add(newContainer)
+	// 	case "div":
+	// 		if isInline {
+	// 			isInline = false
+	// 			inlineContainer = container.NewHBox()
+	// 		}
+	// 		newContainer := container.NewVBox()
+	// 		for i := 0; i < len(curDomNodeChildren); i++ {
+	// 			contentQueue.Enqueue(newContainer)
+	// 		}
+	// 		curContent.Add(newContainer)
+	// 	case "input":
+	// 		inlineContainer.Add(widget.NewEntry())
+	// 		if !isInline {
+	// 			isInline = true
+	// 			curContent.Add(inlineContainer)
+	// 		}
+	// 	case "button":
+	// 		newContainer := container.NewVBox()
+	// 		inlineContainer.Add(newContainer)
+	// 		contentQueue.Enqueue(newContainer)
+	// 		if !isInline {
+	// 			isInline = true
+	// 			curContent.Add(inlineContainer)
+	// 		}
+	// 	case "a":
+	// 		newContainer := container.NewVBox()
+	// 		inlineContainer.Add(newContainer)
+	// 		contentQueue.Enqueue(newContainer)
+	// 		if !isInline {
+	// 			isInline = true
+	// 			curContent.Add(inlineContainer)
+	// 		}
+	// 	case "ul":
+	// 		if isInline {
+	// 			isInline = false
+	// 			inlineContainer = container.NewHBox()
+	// 		}
+	// 		newContainer := container.NewVBox()
+	// 		for i := 0; i < len(curDomNodeChildren); i++ {
+	// 			contentQueue.Enqueue(newContainer)
+	// 		}
+	// 		curContent.Add(newContainer)
+	// 	case "ol":
+	// 		if isInline {
+	// 			isInline = false
+	// 			inlineContainer = container.NewHBox()
+	// 		}
+	// 		newContainer := container.NewVBox()
+	// 		for i := 0; i < len(curDomNodeChildren); i++ {
+	// 			contentQueue.Enqueue(newContainer)
+	// 		}
+	// 		curContent.Add(newContainer)
+	// 	case "li":
+	// 		newContainer := container.NewVBox()
+	// 		curContent.Add(newContainer)
+	// 		contentQueue.Enqueue(newContainer)
+	// 	case "table":
+	// 		if isInline {
+	// 			isInline = false
+	// 			inlineContainer = container.NewHBox()
+	// 		}
+	// 		newContainer := container.NewVBox()
+	// 		for i := 0; i < len(curDomNodeChildren); i++ {
+	// 			contentQueue.Enqueue(newContainer)
+	// 		}
+	// 		curContent.Add(newContainer)
+	// 	case "tr":
+	// 		newContainer := container.NewHBox()
+	// 		for i := 0; i < len(curDomNodeChildren); i++ {
+	// 			contentQueue.Enqueue(newContainer)
+	// 		}
+	// 		curContent.Add(newContainer)
+	// 	case "td":
+	// 		newContainer := container.NewVBox()
+	// 		curContent.Add(newContainer)
+	// 		contentQueue.Enqueue(newContainer)
+	// 	case "img":
+	// 		imgSrc := ""
+	// 		for _, attr := range curDomNode.Attr {
+	// 			if attr.Key == "src" {
+	// 				imgSrc = attr.Val
+	// 			}
+	// 		}
+	// 		inlineContainer.Add(canvas.NewImageFromFile(imgSrc))
+	// 		if !isInline {
+	// 			isInline = true
+	// 			curContent.Add(inlineContainer)
+	// 		}
+	// 	case "span":
+	// 		newContainer := container.NewVBox()
+	// 		inlineContainer.Add(newContainer)
+	// 		contentQueue.Enqueue(newContainer)
+	// 		if !isInline {
+	// 			isInline = true
+	// 			curContent.Add(inlineContainer)
+	// 		}
+	// 	case "tbody":
+	// 		newContainer := container.NewVBox()
+	// 		for i := 0; i < len(curDomNodeChildren); i++ {
+	// 			contentQueue.Enqueue(newContainer)
+	// 		}
+	// 		curContent.Add(newContainer)
+	// 	}
+	// 	domQueue.Enqueue(curDomNodeChildren...)
+	// case html.TextNode:
+	// 	text := strings.Trim(curDomNode.Data, "\n ")
+	// 	if text == "" {
+	// 		continue
+	// 	}
+	// 	textWidget := widget.NewLabel(text)
+	// 	switch curDomNode.Parent.Data {
+	// 	case "a":
+	// 		linkAttr := ""
+	// 		for _, attr := range curDomNode.Parent.Attr {
+	// 			if attr.Key == "href" {
+	// 				linkAttr = attr.Val
+	// 			}
+	// 		}
+	// 		link, err := url.Parse(linkAttr)
+	// 		if err != nil {
+	// 			panic(err)
+	// 		}
+	// 		curContent.Add(widget.NewHyperlink(text, link))
+	// 	case "button":
+	// 		curContent.Add(widget.NewButton(text, func() {}))
+	// 	case "li":
+	// 		switch curDomNode.Parent.Parent.Data {
+	// 		case "ul":
+	// 			curContent.Add(widget.NewLabel(fmt.Sprintf("- %v", text)))
+	// 		case "ol":
+	// 			curContent.Add(widget.NewLabel(fmt.Sprintf("%v. %v", olIndex, text)))
+	// 			olIndex += 1
+	// 		}
+	// 	case "div":
+	// 		curContent.Add(textWidget)
+	// 	case "span":
+	// 		curContent.Add(textWidget)
+	// 	case "td":
+	// 		curContent.Add(textWidget)
+	// 	case "body":
+	// 		if isInline {
+	// 			inlineContainer.Add(textWidget)
+	// 		} else {
+	// 			curContent.Add(textWidget)
+	// 		}
+	// 	}
+	// default:
+	// 	for i := 0; i < len(curDomNodeChildren); i++ {
+	// 		contentQueue.Enqueue(curContent)
+	// 	}
+	// 	domQueue.Enqueue(curDomNodeChildren...)
+	// }
+	// }
 	height := 0
 	for _, child := range content.Objects {
 		height += int(child.MinSize().Height)
