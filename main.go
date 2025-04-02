@@ -54,101 +54,15 @@ func (renderTree *RenderTree) printTree(degree int) {
 	}
 }
 
-type renderTreeNode struct {
-	children []*renderTreeNode
-	isRoot   bool
-	elemType string
-	style    map[string]string
-	parent   *renderTreeNode
-}
-
-type Stack[T any] struct {
-	items []T
-}
-
-func (stack *Stack[T]) Push(items ...T) {
-	for _, item := range items {
-		stack.items = append(stack.items, item)
-	}
-}
-
-func (stack *Stack[T]) Pop() T {
-	item := stack.items[len(stack.items)-1]
-	stack.items = stack.items[:len(stack.items)-1]
-	return item
-}
-
-func (stack *Stack[T]) IsEmpty() bool {
-	return len(stack.items) == 0
-}
-
-type Queue[T any] struct {
-	items []T
-}
-
-func (queue *Queue[T]) Enqueue(items ...T) {
-	for _, item := range items {
-		queue.items = append(queue.items, item)
-	}
-}
-
-func (queue *Queue[T]) Dequeue() T {
-	item := queue.items[0]
-	if len(queue.items) > 1 {
-		queue.items = queue.items[1:]
-	} else {
-		queue.items = []T{}
-	}
-	return item
-}
-
-func (queue *Queue[T]) IsEmpty() bool {
-	return len(queue.items) == 0
-}
-
-func convSeqToSlice[T any](seq iter.Seq[T]) []T {
-	sliceToRet := []T{}
-	for item := range seq {
-		sliceToRet = append(sliceToRet, item)
-	}
-	return sliceToRet
-}
-
-func revSlice[T any](sliceToRev []T) []T {
-	revedSlice := []T{}
-	for i := len(sliceToRev) - 1; i > -1; i-- {
-		revedSlice = append(revedSlice, sliceToRev[i])
-	}
-	return revedSlice
-}
-
-func main() {
-	a := app.New()
-	w := a.NewWindow("Blocks Browser")
-	w.Resize(fyne.NewSize(float32(WIDTH), float32(HEIGHT)))
-
-	content := container.NewVBox()
-	file, err := os.Open("test.html")
-	if err != nil {
-		fmt.Println(err)
-		panic("todo")
-	}
-	defer file.Close()
-	doc, err := html.Parse(file)
-	if err != nil {
-		fmt.Println(err)
-		panic("todo")
-	}
-	var cssOM RenderTree
+func createRenderTree(doc *html.Node) (RenderTree, string, string) {
+	var renderTree RenderTree
 	renderTreeNodeQueue := Queue[*renderTreeNode]{items: []*renderTreeNode{}}
 	domQueue := Queue[*html.Node]{items: []*html.Node{}}
 	domQueue.Enqueue(doc)
-	// cssom creation
-	styles := ""
-	scripts := ""
+	styles, scripts := "", ""
 	for !domQueue.IsEmpty() {
 		curDomNode := domQueue.Dequeue()
-		curDomNodeChildren := convSeqToSlice(curDomNode.ChildNodes())
+		curDomNodeChildren := convSeqToSlice[*html.Node](curDomNode.ChildNodes())
 		switch curDomNode.Type {
 		case html.ElementNode:
 			switch curDomNode.DataAtom {
@@ -184,9 +98,9 @@ func main() {
 			case atom.Head:
 				renderTreeNodeQueue.Dequeue()
 			case atom.Html:
-				cssOM.rootNode = renderTreeNode{children: []*renderTreeNode{}, isRoot: true, elemType: curDomNode.Data, style: map[string]string{}, parent: nil}
+				renderTree.rootNode = renderTreeNode{children: []*renderTreeNode{}, isRoot: true, elemType: curDomNode.Data, style: map[string]string{}, parent: nil}
 				for i := 0; i < len(curDomNodeChildren); i++ {
-					renderTreeNodeQueue.Enqueue(&cssOM.rootNode)
+					renderTreeNodeQueue.Enqueue(&renderTree.rootNode)
 				}
 			default:
 				for _, attr := range curDomNode.Attr {
@@ -194,12 +108,12 @@ func main() {
 						styles += fmt.Sprintf("\n%v {\n%v\n}", curDomNode.Data, attr.Val)
 					}
 				}
-				parentCssOMNode := renderTreeNodeQueue.Dequeue()
-				cssOMNode := renderTreeNode{children: []*renderTreeNode{}, isRoot: false, elemType: curDomNode.Data, style: map[string]string{}, parent: parentCssOMNode}
-				parentCssOMNode.children = append(parentCssOMNode.children, &cssOMNode)
+				parentRenderTreeNode := renderTreeNodeQueue.Dequeue()
+				renderTreeNode := renderTreeNode{children: []*renderTreeNode{}, isRoot: false, elemType: curDomNode.Data, style: map[string]string{}, parent: parentRenderTreeNode}
+				parentRenderTreeNode.children = append(parentRenderTreeNode.children, &renderTreeNode)
 				for i := 0; i < len(curDomNodeChildren); i++ {
-					cssOM.degree += 1
-					renderTreeNodeQueue.Enqueue(&cssOMNode)
+					renderTree.degree += 1
+					renderTreeNodeQueue.Enqueue(&renderTreeNode)
 				}
 			}
 		case html.TextNode:
@@ -213,17 +127,22 @@ func main() {
 			switch curDomNode.Parent.DataAtom {
 			case atom.Script:
 				scripts += curDomNode.Data
-				continue
 			case atom.Style:
 				styles += curDomNode.Data
-				continue
 			case atom.Title:
+			default:
+				parentRenderTreeNode := renderTreeNodeQueue.Dequeue()
+				renderTreeNode := renderTreeNode{children: []*renderTreeNode{}, isRoot: false, elemType: strings.Trim(curDomNode.Data, "\n "), style: map[string]string{}, parent: parentRenderTreeNode}
+				parentRenderTreeNode.children = append(parentRenderTreeNode.children, &renderTreeNode)
 				continue
 			}
-			renderTreeNodeQueue.Dequeue()
 		}
 		domQueue.Enqueue(curDomNodeChildren...)
 	}
+	return renderTree, styles, scripts
+}
+
+func (renderTree *RenderTree) parseCss(styles string) map[string]map[string]string {
 	parser := css.NewParser(parse.NewInput(strings.NewReader(styles)), false)
 	finished := false
 	curRule := ""
@@ -246,8 +165,14 @@ func main() {
 			rules[curRule][string(data)] = ruleVal
 		}
 	}
+	return rules
+}
 
-	// rendering
+func (renderTree *RenderTree) applyDefaultRules() {}
+
+func (renderTree *RenderTree) applyRules(rules map[string]map[string]string) {}
+
+func (renderTree *RenderTree) layoutElements() {
 	// isInline := false
 	// inlineContainer := container.NewHBox()
 	// olIndex := 1
@@ -423,6 +348,38 @@ func main() {
 	// 	domQueue.Enqueue(curDomNodeChildren...)
 	// }
 	// }
+}
+
+type renderTreeNode struct {
+	children []*renderTreeNode
+	isRoot   bool
+	elemType string
+	style    map[string]string
+	parent   *renderTreeNode
+}
+
+func main() {
+	a := app.New()
+	w := a.NewWindow("Blocks Browser")
+	w.Resize(fyne.NewSize(float32(WIDTH), float32(HEIGHT)))
+
+	content := container.NewVBox()
+	file, err := os.Open("test.html")
+	if err != nil {
+		fmt.Println(err)
+		panic("todo")
+	}
+	defer file.Close()
+	doc, err := html.Parse(file)
+	if err != nil {
+		fmt.Println(err)
+		panic("todo")
+	}
+	renderTree, styles, _ := createRenderTree(doc)
+	rules := renderTree.parseCss(styles)
+	renderTree.applyDefaultRules()
+	renderTree.applyRules(rules)
+
 	height := 0
 	for _, child := range content.Objects {
 		height += int(child.MinSize().Height)
