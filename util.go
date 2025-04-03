@@ -1,5 +1,7 @@
 package main
 
+import "iter"
+
 type Stack[T any] struct {
 	items []T
 }
