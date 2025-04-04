@@ -28,7 +28,9 @@ type RenderTree struct {
 }
 
 func (renderTree *RenderTree) printTree(degree int) {
-	treeNodeStack := Stack[*renderTreeNode]{items: []*renderTreeNode{}}
+	treeNodeStack := Stack[*renderTreeNode]{
+		items: []*renderTreeNode{},
+	}
 	levelStack := Stack[int]{items: []int{}}
 	treeNodeStack.Push(&renderTree.rootNode)
 	levelStack.Push(0)
@@ -60,7 +62,7 @@ func createRenderTree(doc *html.Node) (RenderTree, string, string) {
 	styles, scripts := "", ""
 	for !domQueue.IsEmpty() {
 		curDomNode := domQueue.Dequeue()
-		curDomNodeChildren := convSeqToSlice[*html.Node](curDomNode.ChildNodes())
+		curDomNodeChildren := convSeqToSlice(curDomNode.ChildNodes())
 		switch curDomNode.Type {
 		case html.ElementNode:
 			switch curDomNode.DataAtom {
@@ -96,18 +98,42 @@ func createRenderTree(doc *html.Node) (RenderTree, string, string) {
 			case atom.Head:
 				renderTreeNodeQueue.Dequeue()
 			case atom.Html:
-				renderTree.rootNode = renderTreeNode{children: []*renderTreeNode{}, isRoot: true, elemType: curDomNode.Data, isText: false, style: map[string]string{}, parent: nil}
+				renderTree.rootNode = renderTreeNode{
+					children:     []*renderTreeNode{},
+					isRoot:       true,
+					elemTypeAtom: curDomNode.DataAtom,
+					elemType:     "html",
+					isText:       false,
+					style:        map[string]string{},
+					parent:       nil,
+				}
 				for i := 0; i < len(curDomNodeChildren); i++ {
 					renderTreeNodeQueue.Enqueue(&renderTree.rootNode)
 				}
 			default:
+				neededAttrName := ""
+				neededAttr := ""
 				for _, attr := range curDomNode.Attr {
 					if attr.Key == "style" {
 						styles += fmt.Sprintf("\n%v {\n%v\n}", curDomNode.Data, attr.Val)
 					}
+					if attr.Key == "src" || attr.Key == "href" {
+						neededAttrName = attr.Key
+						neededAttr = attr.Val
+					}
 				}
 				parentRenderTreeNode := renderTreeNodeQueue.Dequeue()
-				renderTreeNode := renderTreeNode{children: []*renderTreeNode{}, isRoot: false, isText: false, elemType: curDomNode.Data, style: map[string]string{}, parent: parentRenderTreeNode}
+				renderTreeNode := renderTreeNode{
+					attr:         map[string]string{neededAttrName: neededAttr},
+					children:     []*renderTreeNode{},
+					elemTypeAtom: curDomNode.DataAtom,
+					elemType:     curDomNode.Data,
+					isRoot:       false,
+					isText:       false,
+					text:         "",
+					parent:       parentRenderTreeNode,
+					style:        map[string]string{},
+				}
 				parentRenderTreeNode.children = append(parentRenderTreeNode.children, &renderTreeNode)
 				for i := 0; i < len(curDomNodeChildren); i++ {
 					renderTree.degree += 1
@@ -124,13 +150,23 @@ func createRenderTree(doc *html.Node) (RenderTree, string, string) {
 			}
 			switch curDomNode.Parent.DataAtom {
 			case atom.Script:
-				scripts += curDomNode.Data
+				scripts += text
 			case atom.Style:
-				styles += curDomNode.Data
+				styles += text
 			case atom.Title:
 			default:
 				parentRenderTreeNode := renderTreeNodeQueue.Dequeue()
-				renderTreeNode := renderTreeNode{children: []*renderTreeNode{}, isRoot: false, isText: true, elemType: 0, style: map[string]string{}, parent: parentRenderTreeNode}
+				renderTreeNode := renderTreeNode{
+					attr:         map[string]string{},
+					children:     []*renderTreeNode{},
+					isRoot:       false,
+					isText:       true,
+					elemTypeAtom: 0,
+					elemType:     "",
+					text:         text,
+					style:        map[string]string{},
+					parent:       parentRenderTreeNode,
+				}
 				parentRenderTreeNode.children = append(parentRenderTreeNode.children, &renderTreeNode)
 				continue
 			}
@@ -166,7 +202,7 @@ func (renderTree *RenderTree) parseCss(styles string) map[string]map[string]stri
 	return rules
 }
 
-func (renderTree *RenderTree) applyRules(rules map[string]map[string]string) {
+func (renderTree *RenderTree) applyRules(_ map[string]map[string]string) {
 	renderTreeNodeQueue := Queue[*renderTreeNode]{items: []*renderTreeNode{}}
 	renderTreeNodeQueue.Enqueue(&renderTree.rootNode)
 	for !renderTreeNodeQueue.IsEmpty() {
@@ -175,7 +211,7 @@ func (renderTree *RenderTree) applyRules(rules map[string]map[string]string) {
 			curRenderTreeNode.style["display"] = "inline"
 			continue
 		}
-		switch curRenderTreeNode.elemType {
+		switch curRenderTreeNode.elemTypeAtom {
 		case atom.Html:
 			curRenderTreeNode.style["display"] = "block"
 		case atom.Body:
@@ -222,8 +258,9 @@ func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
 	for !renderTreeNodeQueue.IsEmpty() {
 		curRenderTreeNode := renderTreeNodeQueue.Dequeue()
 		curContent := contentQueue.Dequeue()
+		fmt.Println(curRenderTreeNode)
 		if curRenderTreeNode.isText {
-			switch curRenderTreeNode.parent.elemType {
+			switch curRenderTreeNode.parent.parent.elemTypeAtom {
 			case atom.A:
 				href, ok := curRenderTreeNode.parent.attr["href"]
 				if !ok {
@@ -237,7 +274,7 @@ func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
 			case atom.Button:
 				curContent.Add(widget.NewButton(curRenderTreeNode.text, func() {}))
 			case atom.Li:
-				switch curRenderTreeNode.parent.parent.elemType {
+				switch curRenderTreeNode.parent.parent.elemTypeAtom {
 				case atom.Ul:
 					curContent.Add(widget.NewLabel(fmt.Sprintf("- %v", curRenderTreeNode.text)))
 				case atom.Ol:
@@ -268,7 +305,7 @@ func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
 			}
 			curContent.Add(newContainer)
 		case "inline":
-			switch curRenderTreeNode.elemType {
+			switch curRenderTreeNode.elemTypeAtom {
 			case atom.Input:
 				inlineContainer.Add(widget.NewEntry())
 			case atom.Button, atom.A, atom.Span:
@@ -287,18 +324,20 @@ func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
 				curContent.Add(inlineContainer)
 			}
 		}
+		renderTreeNodeQueue.Enqueue(curRenderTreeNode.children...)
 	}
 }
 
 type renderTreeNode struct {
-	attr     map[string]string
-	children []*renderTreeNode
-	elemType atom.Atom
-	isRoot   bool
-	isText   bool
-	text     string
-	parent   *renderTreeNode
-	style    map[string]string
+	attr         map[string]string
+	children     []*renderTreeNode
+	elemTypeAtom atom.Atom
+	elemType     string
+	isRoot       bool
+	isText       bool
+	text         string
+	parent       *renderTreeNode
+	style        map[string]string
 }
 
 func main() {
@@ -321,6 +360,7 @@ func main() {
 	renderTree, styles, _ := createRenderTree(doc)
 	rules := renderTree.parseCss(styles)
 	renderTree.applyRules(rules)
+	renderTree.layoutElements(content)
 
 	height := 0
 	for _, child := range content.Objects {
