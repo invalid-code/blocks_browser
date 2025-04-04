@@ -2,17 +2,16 @@ package main
 
 import (
 	"fmt"
-
-	// "net/url"
+	"net/url"
 	"os"
 	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 
-	// "fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	// "fyne.io/fyne/v2/widget"
+	"fyne.io/fyne/v2/widget"
 	"github.com/tdewolff/parse/v2"
 	"github.com/tdewolff/parse/v2/css"
 	"golang.org/x/net/html"
@@ -97,7 +96,7 @@ func createRenderTree(doc *html.Node) (RenderTree, string, string) {
 			case atom.Head:
 				renderTreeNodeQueue.Dequeue()
 			case atom.Html:
-				renderTree.rootNode = renderTreeNode{children: []*renderTreeNode{}, isRoot: true, elemType: curDomNode.Data, style: map[string]string{}, parent: nil}
+				renderTree.rootNode = renderTreeNode{children: []*renderTreeNode{}, isRoot: true, elemType: curDomNode.Data, isText: false, style: map[string]string{}, parent: nil}
 				for i := 0; i < len(curDomNodeChildren); i++ {
 					renderTreeNodeQueue.Enqueue(&renderTree.rootNode)
 				}
@@ -108,7 +107,7 @@ func createRenderTree(doc *html.Node) (RenderTree, string, string) {
 					}
 				}
 				parentRenderTreeNode := renderTreeNodeQueue.Dequeue()
-				renderTreeNode := renderTreeNode{children: []*renderTreeNode{}, isRoot: false, elemType: curDomNode.Data, style: map[string]string{}, parent: parentRenderTreeNode}
+				renderTreeNode := renderTreeNode{children: []*renderTreeNode{}, isRoot: false, isText: false, elemType: curDomNode.Data, style: map[string]string{}, parent: parentRenderTreeNode}
 				parentRenderTreeNode.children = append(parentRenderTreeNode.children, &renderTreeNode)
 				for i := 0; i < len(curDomNodeChildren); i++ {
 					renderTree.degree += 1
@@ -131,7 +130,7 @@ func createRenderTree(doc *html.Node) (RenderTree, string, string) {
 			case atom.Title:
 			default:
 				parentRenderTreeNode := renderTreeNodeQueue.Dequeue()
-				renderTreeNode := renderTreeNode{children: []*renderTreeNode{}, isRoot: false, elemType: strings.Trim(curDomNode.Data, "\n "), style: map[string]string{}, parent: parentRenderTreeNode}
+				renderTreeNode := renderTreeNode{children: []*renderTreeNode{}, isRoot: false, isText: true, elemType: 0, style: map[string]string{}, parent: parentRenderTreeNode}
 				parentRenderTreeNode.children = append(parentRenderTreeNode.children, &renderTreeNode)
 				continue
 			}
@@ -167,194 +166,139 @@ func (renderTree *RenderTree) parseCss(styles string) map[string]map[string]stri
 	return rules
 }
 
-func (renderTree *RenderTree) applyDefaultRules() {}
+func (renderTree *RenderTree) applyRules(rules map[string]map[string]string) {
+	renderTreeNodeQueue := Queue[*renderTreeNode]{items: []*renderTreeNode{}}
+	renderTreeNodeQueue.Enqueue(&renderTree.rootNode)
+	for !renderTreeNodeQueue.IsEmpty() {
+		curRenderTreeNode := renderTreeNodeQueue.Dequeue()
+		if curRenderTreeNode.isText {
+			curRenderTreeNode.style["display"] = "inline"
+			continue
+		}
+		switch curRenderTreeNode.elemType {
+		case atom.Html:
+			curRenderTreeNode.style["display"] = "block"
+		case atom.Body:
+			curRenderTreeNode.style["display"] = "block"
+		case atom.Input:
+			curRenderTreeNode.style["display"] = "inline"
+		case atom.Div:
+			curRenderTreeNode.style["display"] = "block"
+		case atom.Button:
+			curRenderTreeNode.style["display"] = "inline"
+		case atom.A:
+			curRenderTreeNode.style["display"] = "inline"
+		case atom.Ul:
+			curRenderTreeNode.style["display"] = "block"
+		case atom.Ol:
+			curRenderTreeNode.style["display"] = "block"
+		case atom.Li:
+			curRenderTreeNode.style["display"] = "block"
+		case atom.Table:
+			curRenderTreeNode.style["display"] = "block"
+		case atom.Tbody:
+			curRenderTreeNode.style["display"] = "block"
+		case atom.Tr:
+			curRenderTreeNode.style["display"] = "block"
+		case atom.Td:
+			curRenderTreeNode.style["display"] = "block"
+		case atom.Span:
+			curRenderTreeNode.style["display"] = "inline"
+		case atom.Img:
+			curRenderTreeNode.style["display"] = "inline"
+		}
+		renderTreeNodeQueue.Enqueue(curRenderTreeNode.children...)
+	}
+}
 
-func (renderTree *RenderTree) applyRules(rules map[string]map[string]string) {}
-
-func (renderTree *RenderTree) layoutElements() {
-	// isInline := false
-	// inlineContainer := container.NewHBox()
-	// olIndex := 1
-	// for !domQueue.IsEmpty() {
-	// 	curDomNode := domQueue.Dequeue()
-	// curContent := contentQueue.Dequeue()
-	// curDomNodeChildren := convSeqToSlice(curDomNode.ChildNodes())
-	// switch curDomNode.Type {
-	// case html.ElementNode:
-	// 	switch curDomNode.Data {
-	// 	case "head":
-	// 		continue
-	// 	case "html":
-	// 		for i := 0; i < len(curDomNodeChildren); i++ {
-	// 			contentQueue.Enqueue(curContent)
-	// 		}
-	// 	case "body":
-	// 		newContainer := container.NewVBox()
-	// 		for i := 0; i < len(curDomNodeChildren); i++ {
-	// 			contentQueue.Enqueue(newContainer)
-	// 		}
-	// 		curContent.Add(newContainer)
-	// 	case "div":
-	// 		if isInline {
-	// 			isInline = false
-	// 			inlineContainer = container.NewHBox()
-	// 		}
-	// 		newContainer := container.NewVBox()
-	// 		for i := 0; i < len(curDomNodeChildren); i++ {
-	// 			contentQueue.Enqueue(newContainer)
-	// 		}
-	// 		curContent.Add(newContainer)
-	// 	case "input":
-	// 		inlineContainer.Add(widget.NewEntry())
-	// 		if !isInline {
-	// 			isInline = true
-	// 			curContent.Add(inlineContainer)
-	// 		}
-	// 	case "button":
-	// 		newContainer := container.NewVBox()
-	// 		inlineContainer.Add(newContainer)
-	// 		contentQueue.Enqueue(newContainer)
-	// 		if !isInline {
-	// 			isInline = true
-	// 			curContent.Add(inlineContainer)
-	// 		}
-	// 	case "a":
-	// 		newContainer := container.NewVBox()
-	// 		inlineContainer.Add(newContainer)
-	// 		contentQueue.Enqueue(newContainer)
-	// 		if !isInline {
-	// 			isInline = true
-	// 			curContent.Add(inlineContainer)
-	// 		}
-	// 	case "ul":
-	// 		if isInline {
-	// 			isInline = false
-	// 			inlineContainer = container.NewHBox()
-	// 		}
-	// 		newContainer := container.NewVBox()
-	// 		for i := 0; i < len(curDomNodeChildren); i++ {
-	// 			contentQueue.Enqueue(newContainer)
-	// 		}
-	// 		curContent.Add(newContainer)
-	// 	case "ol":
-	// 		if isInline {
-	// 			isInline = false
-	// 			inlineContainer = container.NewHBox()
-	// 		}
-	// 		newContainer := container.NewVBox()
-	// 		for i := 0; i < len(curDomNodeChildren); i++ {
-	// 			contentQueue.Enqueue(newContainer)
-	// 		}
-	// 		curContent.Add(newContainer)
-	// 	case "li":
-	// 		newContainer := container.NewVBox()
-	// 		curContent.Add(newContainer)
-	// 		contentQueue.Enqueue(newContainer)
-	// 	case "table":
-	// 		if isInline {
-	// 			isInline = false
-	// 			inlineContainer = container.NewHBox()
-	// 		}
-	// 		newContainer := container.NewVBox()
-	// 		for i := 0; i < len(curDomNodeChildren); i++ {
-	// 			contentQueue.Enqueue(newContainer)
-	// 		}
-	// 		curContent.Add(newContainer)
-	// 	case "tr":
-	// 		newContainer := container.NewHBox()
-	// 		for i := 0; i < len(curDomNodeChildren); i++ {
-	// 			contentQueue.Enqueue(newContainer)
-	// 		}
-	// 		curContent.Add(newContainer)
-	// 	case "td":
-	// 		newContainer := container.NewVBox()
-	// 		curContent.Add(newContainer)
-	// 		contentQueue.Enqueue(newContainer)
-	// 	case "img":
-	// 		imgSrc := ""
-	// 		for _, attr := range curDomNode.Attr {
-	// 			if attr.Key == "src" {
-	// 				imgSrc = attr.Val
-	// 			}
-	// 		}
-	// 		inlineContainer.Add(canvas.NewImageFromFile(imgSrc))
-	// 		if !isInline {
-	// 			isInline = true
-	// 			curContent.Add(inlineContainer)
-	// 		}
-	// 	case "span":
-	// 		newContainer := container.NewVBox()
-	// 		inlineContainer.Add(newContainer)
-	// 		contentQueue.Enqueue(newContainer)
-	// 		if !isInline {
-	// 			isInline = true
-	// 			curContent.Add(inlineContainer)
-	// 		}
-	// 	case "tbody":
-	// 		newContainer := container.NewVBox()
-	// 		for i := 0; i < len(curDomNodeChildren); i++ {
-	// 			contentQueue.Enqueue(newContainer)
-	// 		}
-	// 		curContent.Add(newContainer)
-	// 	}
-	// 	domQueue.Enqueue(curDomNodeChildren...)
-	// case html.TextNode:
-	// 	text := strings.Trim(curDomNode.Data, "\n ")
-	// 	if text == "" {
-	// 		continue
-	// 	}
-	// 	textWidget := widget.NewLabel(text)
-	// 	switch curDomNode.Parent.Data {
-	// 	case "a":
-	// 		linkAttr := ""
-	// 		for _, attr := range curDomNode.Parent.Attr {
-	// 			if attr.Key == "href" {
-	// 				linkAttr = attr.Val
-	// 			}
-	// 		}
-	// 		link, err := url.Parse(linkAttr)
-	// 		if err != nil {
-	// 			panic(err)
-	// 		}
-	// 		curContent.Add(widget.NewHyperlink(text, link))
-	// 	case "button":
-	// 		curContent.Add(widget.NewButton(text, func() {}))
-	// 	case "li":
-	// 		switch curDomNode.Parent.Parent.Data {
-	// 		case "ul":
-	// 			curContent.Add(widget.NewLabel(fmt.Sprintf("- %v", text)))
-	// 		case "ol":
-	// 			curContent.Add(widget.NewLabel(fmt.Sprintf("%v. %v", olIndex, text)))
-	// 			olIndex += 1
-	// 		}
-	// 	case "div":
-	// 		curContent.Add(textWidget)
-	// 	case "span":
-	// 		curContent.Add(textWidget)
-	// 	case "td":
-	// 		curContent.Add(textWidget)
-	// 	case "body":
-	// 		if isInline {
-	// 			inlineContainer.Add(textWidget)
-	// 		} else {
-	// 			curContent.Add(textWidget)
-	// 		}
-	// 	}
-	// default:
-	// 	for i := 0; i < len(curDomNodeChildren); i++ {
-	// 		contentQueue.Enqueue(curContent)
-	// 	}
-	// 	domQueue.Enqueue(curDomNodeChildren...)
-	// }
-	// }
+func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
+	isInline := false
+	inlineContainer := container.NewHBox()
+	olIndex := 1
+	renderTreeNodeQueue := Queue[*renderTreeNode]{items: []*renderTreeNode{}}
+	contentQueue := Queue[*fyne.Container]{items: []*fyne.Container{}}
+	renderTreeNodeQueue.Enqueue(&renderTree.rootNode)
+	contentQueue.Enqueue(content)
+	for !renderTreeNodeQueue.IsEmpty() {
+		curRenderTreeNode := renderTreeNodeQueue.Dequeue()
+		curContent := contentQueue.Dequeue()
+		if curRenderTreeNode.isText {
+			switch curRenderTreeNode.parent.elemType {
+			case atom.A:
+				href, ok := curRenderTreeNode.parent.attr["href"]
+				if !ok {
+					panic("href attribute missing from a element")
+				}
+				link, err := url.Parse(href)
+				if err != nil {
+					panic(err)
+				}
+				curContent.Add(widget.NewHyperlink(curRenderTreeNode.text, link))
+			case atom.Button:
+				curContent.Add(widget.NewButton(curRenderTreeNode.text, func() {}))
+			case atom.Li:
+				switch curRenderTreeNode.parent.parent.elemType {
+				case atom.Ul:
+					curContent.Add(widget.NewLabel(fmt.Sprintf("- %v", curRenderTreeNode.text)))
+				case atom.Ol:
+					curContent.Add(widget.NewLabel(fmt.Sprintf("%v. %v", olIndex, curRenderTreeNode.text)))
+					olIndex += 1
+				}
+			case atom.Div, atom.Span, atom.Td:
+				curContent.Add(widget.NewLabel(curRenderTreeNode.text))
+			case atom.Body:
+				textWidget := widget.NewLabel(curRenderTreeNode.text)
+				if isInline {
+					inlineContainer.Add(textWidget)
+				} else {
+					curContent.Add(textWidget)
+				}
+			}
+			continue
+		}
+		switch curRenderTreeNode.style["display"] {
+		case "block":
+			if isInline {
+				isInline = false
+				inlineContainer = container.NewHBox()
+			}
+			newContainer := container.NewVBox()
+			for i := 0; i < len(curRenderTreeNode.children); i++ {
+				contentQueue.Enqueue(newContainer)
+			}
+			curContent.Add(newContainer)
+		case "inline":
+			switch curRenderTreeNode.elemType {
+			case atom.Input:
+				inlineContainer.Add(widget.NewEntry())
+			case atom.Button, atom.A, atom.Span:
+				newContainer := container.NewVBox()
+				inlineContainer.Add(newContainer)
+				contentQueue.Enqueue(newContainer)
+			case atom.Img:
+				src, ok := curRenderTreeNode.attr["src"]
+				if !ok {
+					panic("src attribute missing from img element")
+				}
+				inlineContainer.Add(canvas.NewImageFromFile(src))
+			}
+			if !isInline {
+				isInline = true
+				curContent.Add(inlineContainer)
+			}
+		}
+	}
 }
 
 type renderTreeNode struct {
+	attr     map[string]string
 	children []*renderTreeNode
+	elemType atom.Atom
 	isRoot   bool
-	elemType string
-	style    map[string]string
+	isText   bool
+	text     string
 	parent   *renderTreeNode
+	style    map[string]string
 }
 
 func main() {
@@ -376,7 +320,6 @@ func main() {
 	}
 	renderTree, styles, _ := createRenderTree(doc)
 	rules := renderTree.parseCss(styles)
-	renderTree.applyDefaultRules()
 	renderTree.applyRules(rules)
 
 	height := 0
