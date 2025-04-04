@@ -235,7 +235,7 @@ func (renderTree *RenderTree) applyRules(_ map[string]map[string]string) {
 		case atom.Tbody:
 			curRenderTreeNode.style["display"] = "block"
 		case atom.Tr:
-			curRenderTreeNode.style["display"] = "block"
+			curRenderTreeNode.style["display"] = "inline"
 		case atom.Td:
 			curRenderTreeNode.style["display"] = "block"
 		case atom.Span:
@@ -258,9 +258,8 @@ func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
 	for !renderTreeNodeQueue.IsEmpty() {
 		curRenderTreeNode := renderTreeNodeQueue.Dequeue()
 		curContent := contentQueue.Dequeue()
-		fmt.Println(curRenderTreeNode)
 		if curRenderTreeNode.isText {
-			switch curRenderTreeNode.parent.parent.elemTypeAtom {
+			switch curRenderTreeNode.parent.elemTypeAtom {
 			case atom.A:
 				href, ok := curRenderTreeNode.parent.attr["href"]
 				if !ok {
@@ -299,11 +298,18 @@ func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
 				isInline = false
 				inlineContainer = container.NewHBox()
 			}
-			newContainer := container.NewVBox()
-			for i := 0; i < len(curRenderTreeNode.children); i++ {
-				contentQueue.Enqueue(newContainer)
+			switch curRenderTreeNode.elemTypeAtom {
+			case atom.Html, atom.Body:
+				for i := 0; i < len(curRenderTreeNode.children); i++ {
+					contentQueue.Enqueue(curContent)
+				}
+			default:
+				newContainer := container.NewVBox()
+				for i := 0; i < len(curRenderTreeNode.children); i++ {
+					contentQueue.Enqueue(newContainer)
+				}
+				curContent.Add(newContainer)
 			}
-			curContent.Add(newContainer)
 		case "inline":
 			switch curRenderTreeNode.elemTypeAtom {
 			case atom.Input:
@@ -312,6 +318,13 @@ func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
 				newContainer := container.NewVBox()
 				inlineContainer.Add(newContainer)
 				contentQueue.Enqueue(newContainer)
+			case atom.Tr:
+				newContainer := container.NewVBox()
+				for i := 0; i < len(curRenderTreeNode.children); i++ {
+					contentQueue.Enqueue(newContainer)
+				}
+				curContent.Add(newContainer)
+				inlineContainer.Add(newContainer)
 			case atom.Img:
 				src, ok := curRenderTreeNode.attr["src"]
 				if !ok {
