@@ -49,7 +49,11 @@ func (renderTree *RenderTree) printTree(degree int) {
 			for i := 0; i < curLevel; i++ {
 				fmt.Printf("-")
 			}
-			fmt.Println(curTreeNode.elemType)
+			if curTreeNode.isText {
+				fmt.Printf("\"%v\"\n", curTreeNode.text)
+			} else {
+				fmt.Println(curTreeNode.elemType)
+			}
 		}
 	}
 }
@@ -136,8 +140,10 @@ func createRenderTree(doc *html.Node) (RenderTree, string, string) {
 				}
 				parentRenderTreeNode.children = append(parentRenderTreeNode.children, &renderTreeNode)
 				for i := 0; i < len(curDomNodeChildren); i++ {
-					renderTree.degree += 1
 					renderTreeNodeQueue.Enqueue(&renderTreeNode)
+					if i == len(curDomNodeChildren)-1 {
+						renderTree.degree += 1
+					}
 				}
 			}
 		case html.TextNode:
@@ -202,14 +208,15 @@ func (renderTree *RenderTree) parseCss(styles string) map[string]map[string]stri
 	return rules
 }
 
-func (renderTree *RenderTree) applyRules(_ map[string]map[string]string) {
+func (renderTree *RenderTree) applyRules(rules map[string]map[string]string) {
 	renderTreeNodeQueue := Queue[*renderTreeNode]{items: []*renderTreeNode{}}
 	renderTreeNodeQueue.Enqueue(&renderTree.rootNode)
 	for !renderTreeNodeQueue.IsEmpty() {
 		curRenderTreeNode := renderTreeNodeQueue.Dequeue()
-		if curRenderTreeNode.isText {
-			curRenderTreeNode.style["display"] = "inline"
-			continue
+		if renderTreeNodeStyle, ok := rules[curRenderTreeNode.elemType]; ok {
+			for key, val := range renderTreeNodeStyle {
+				curRenderTreeNode.style[key] = val
+			}
 		}
 		switch curRenderTreeNode.elemTypeAtom {
 		case atom.Html:
@@ -235,7 +242,7 @@ func (renderTree *RenderTree) applyRules(_ map[string]map[string]string) {
 		case atom.Tbody:
 			curRenderTreeNode.style["display"] = "block"
 		case atom.Tr:
-			curRenderTreeNode.style["display"] = "inline"
+			curRenderTreeNode.style["display"] = "block"
 		case atom.Td:
 			curRenderTreeNode.style["display"] = "block"
 		case atom.Span:
@@ -247,14 +254,14 @@ func (renderTree *RenderTree) applyRules(_ map[string]map[string]string) {
 	}
 }
 
-func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
+func (renderTree *RenderTree) layoutElements() *fyne.Container {
 	isInline := false
-	inlineContainer := container.NewHBox()
+	layoutTree, inlineContainer := container.NewVBox(), container.NewHBox()
 	olIndex := 1
 	renderTreeNodeQueue := Queue[*renderTreeNode]{items: []*renderTreeNode{}}
 	contentQueue := Queue[*fyne.Container]{items: []*fyne.Container{}}
 	renderTreeNodeQueue.Enqueue(&renderTree.rootNode)
-	contentQueue.Enqueue(content)
+	contentQueue.Enqueue(layoutTree)
 	for !renderTreeNodeQueue.IsEmpty() {
 		curRenderTreeNode := renderTreeNodeQueue.Dequeue()
 		curContent := contentQueue.Dequeue()
@@ -275,7 +282,7 @@ func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
 			case atom.Li:
 				switch curRenderTreeNode.parent.parent.elemTypeAtom {
 				case atom.Ul:
-					curContent.Add(widget.NewLabel(fmt.Sprintf("- %v", curRenderTreeNode.text)))
+					curContent.Add(widget.NewRichText(&widget.ListSegment{Items: []widget.RichTextSegment{&widget.TextSegment{Text: curRenderTreeNode.text, Style: widget.RichTextStyle{}}}, Ordered: false}))
 				case atom.Ol:
 					curContent.Add(widget.NewLabel(fmt.Sprintf("%v. %v", olIndex, curRenderTreeNode.text)))
 					olIndex += 1
@@ -303,6 +310,23 @@ func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
 				for i := 0; i < len(curRenderTreeNode.children); i++ {
 					contentQueue.Enqueue(curContent)
 				}
+			case atom.Tr:
+				newContainer := container.NewHBox()
+				for i := 0; i < len(curRenderTreeNode.children); i++ {
+					contentQueue.Enqueue(newContainer)
+				}
+				curContent.Add(newContainer)
+			case atom.Table:
+				var newContainer *fyne.Container
+				if _, ok := curRenderTreeNode.style["border"]; ok {
+					newContainer = container.NewBorder(nil, nil, nil, nil)
+				} else {
+					newContainer = container.NewVBox()
+				}
+				for i := 0; i < len(curRenderTreeNode.children); i++ {
+					contentQueue.Enqueue(newContainer)
+				}
+				curContent.Add(newContainer)
 			default:
 				newContainer := container.NewVBox()
 				for i := 0; i < len(curRenderTreeNode.children); i++ {
@@ -318,19 +342,14 @@ func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
 				newContainer := container.NewVBox()
 				inlineContainer.Add(newContainer)
 				contentQueue.Enqueue(newContainer)
-			case atom.Tr:
-				newContainer := container.NewVBox()
-				for i := 0; i < len(curRenderTreeNode.children); i++ {
-					contentQueue.Enqueue(newContainer)
-				}
-				curContent.Add(newContainer)
-				inlineContainer.Add(newContainer)
 			case atom.Img:
 				src, ok := curRenderTreeNode.attr["src"]
 				if !ok {
 					panic("src attribute missing from img element")
 				}
-				inlineContainer.Add(canvas.NewImageFromFile(src))
+				img := canvas.NewImageFromFile(src)
+				img.FillMode = canvas.ImageFillOriginal
+				inlineContainer.Add(img)
 			}
 			if !isInline {
 				isInline = true
@@ -339,6 +358,7 @@ func (renderTree *RenderTree) layoutElements(content *fyne.Container) {
 		}
 		renderTreeNodeQueue.Enqueue(curRenderTreeNode.children...)
 	}
+	return layoutTree
 }
 
 type renderTreeNode struct {
@@ -358,7 +378,6 @@ func main() {
 	w := a.NewWindow("Blocks Browser")
 	w.Resize(fyne.NewSize(float32(WIDTH), float32(HEIGHT)))
 
-	content := container.NewVBox()
 	file, err := os.Open("test.html")
 	if err != nil {
 		fmt.Println(err)
@@ -373,17 +392,17 @@ func main() {
 	renderTree, styles, _ := createRenderTree(doc)
 	rules := renderTree.parseCss(styles)
 	renderTree.applyRules(rules)
-	renderTree.layoutElements(content)
+	layoutTree := renderTree.layoutElements()
 
 	height := 0
-	for _, child := range content.Objects {
+	for _, child := range layoutTree.Objects {
 		height += int(child.MinSize().Height)
 	}
 	if height > HEIGHT {
-		scrollableContent := container.NewVScroll(content)
+		scrollableContent := container.NewVScroll(layoutTree)
 		w.SetContent(scrollableContent)
 	} else {
-		w.SetContent(content)
+		w.SetContent(layoutTree)
 	}
 	w.ShowAndRun()
 }
