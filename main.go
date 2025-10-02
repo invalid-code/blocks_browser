@@ -282,9 +282,25 @@ func (renderTree *RenderTree) layoutElements() *fyne.Container {
 			case atom.Li:
 				switch curRenderTreeNode.parent.parent.elemTypeAtom {
 				case atom.Ul:
-					curContent.Add(widget.NewRichText(&widget.ListSegment{Items: []widget.RichTextSegment{&widget.TextSegment{Text: curRenderTreeNode.text, Style: widget.RichTextStyle{}}}, Ordered: false}))
+					curContent.Add(
+						widget.NewRichText(
+							&widget.ListSegment{
+								Items: []widget.RichTextSegment{
+									&widget.TextSegment{
+										Text:  curRenderTreeNode.text,
+										Style: widget.RichTextStyle{},
+									},
+								},
+								Ordered: false,
+							},
+						),
+					)
 				case atom.Ol:
-					curContent.Add(widget.NewLabel(fmt.Sprintf("%v. %v", olIndex, curRenderTreeNode.text)))
+					curContent.Add(
+						widget.NewLabel(
+							fmt.Sprintf("%v. %v", olIndex, curRenderTreeNode.text),
+						),
+					)
 					olIndex += 1
 				}
 			case atom.Div, atom.Span, atom.Td:
@@ -319,7 +335,7 @@ func (renderTree *RenderTree) layoutElements() *fyne.Container {
 			case atom.Table:
 				var newContainer *fyne.Container
 				if _, ok := curRenderTreeNode.style["border"]; ok {
-					newContainer = container.NewBorder(nil, nil, nil, nil)
+					newContainer = container.NewVBox()
 				} else {
 					newContainer = container.NewVBox()
 				}
